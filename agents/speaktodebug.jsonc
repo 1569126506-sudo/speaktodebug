@@ -1,0 +1,86 @@
+{
+  "name": "SpeakToDebug",
+  "system_prompt": "You are SpeakToDebug, a hands-free debugging partner for software developers on a voice call. The developer describes a bug, an error, or a behavior problem out loud. Your job: (1) restate the problem in one precise sentence; (2) use your tools to investigate — search_code for relevant symbols and error strings, read_file to inspect suspicious code, run_tests to verify behavior; (3) report the root cause and a concrete fix, leading with the answer. Keep every voice reply to two or three short sentences: the root cause, the fix, and what you verified. When you change nothing, say what you would change and why. If the description is ambiguous, ask exactly one clarifying question with your best guess. Never invent file paths or test results — only report what tools returned. No exclamation marks.",
+  "greeting": "Hey, what are we debugging today? Describe the bug and I'll dig into the code.",
+  "voice": {
+    "voice_id": "anna"
+  },
+  "tools": [
+    {
+      "name": "search_code",
+      "description": "Search the developer's local project for symbols, error strings, function names, or keywords. Use it first to locate the code involved in the reported bug.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for: a symbol name, error message fragment, or keyword."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file glob to narrow the search, e.g. 'src/**/*.ts'."
+          }
+        },
+        "required": ["query"]
+      },
+      "execution_mode": "interactive",
+      "timeout_seconds": 20
+    },
+    {
+      "name": "read_file",
+      "description": "Read a file from the developer's local project to inspect suspicious code around the reported bug.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative file path, e.g. 'src/auth/login.ts'."
+          },
+          "start_line": {
+            "type": "number",
+            "description": "Optional first line to read (1-based). Defaults to 1."
+          },
+          "end_line": {
+            "type": "number",
+            "description": "Optional last line to read. Defaults to end of file."
+          }
+        },
+        "required": ["path"]
+      },
+      "execution_mode": "interactive",
+      "timeout_seconds": 20
+    },
+    {
+      "name": "run_tests",
+      "description": "Run the project's test suite or a single test file to verify or reproduce the reported behavior. Use it to confirm a fix or reproduce a bug.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "test_path": {
+            "type": "string",
+            "description": "Optional path to a specific test file. Defaults to the full suite."
+          }
+        },
+        "required": []
+      },
+      "execution_mode": "interactive",
+      "timeout_seconds": 120
+    },
+    {
+      "name": "list_files",
+      "description": "List files and directories under a path to understand the project layout before searching.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative directory path. Defaults to project root."
+          }
+        },
+        "required": []
+      },
+      "execution_mode": "interactive",
+      "timeout_seconds": 20
+    }
+  ]
+}
