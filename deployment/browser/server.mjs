@@ -81,26 +81,28 @@ const runLocalTool = async (name, args) => {
 loadEnv()
 required('ASSEMBLYAI_API_KEY', 'get one at https://www.assemblyai.com/dashboard/api-keys')
 
-// Agent config: loaded from the AssemblyAI store when reachable, with a
-// local file fallback so the server ALWAYS boots (the store's read
-// propagation has been observed to lag for 30+ minutes).
+// Agent config: the LOCAL agents/<name>.jsonc is the source of truth — it is
+// what we edit and test. The store copy is only probed to confirm the agent
+// id still exists (its read propagation lags 30+ minutes and stale store
+// bodies previously shipped tool-less configs to live calls).
 const AGENT = await (async () => {
   const name = process.env.AGENT || 'speaktodebug'
+  const local = readAgent(name)
   const known = storedAgentId(name)
   if (known) {
     try {
-      const agent = await aai(`/agents/${known}`)
-      return { id: known, ...agent }
+      await aai(`/agents/${known}`)
+      console.log(`Agent: ${known} (store ok, config from agents/${name}.jsonc)`)
+      return { id: known, ...local }
     } catch (error) {
-      console.error(`Could not load agent ${known}: ${error.message} — falling back to local file`)
+      console.error(`Agent ${known} not readable: ${error.message} — id hidden, local config still in charge`)
     }
+  } else {
+    console.log(`Loaded "${local.name}" from agents/${name}.jsonc (no stored id)`)
   }
-  const agent = readAgent(name)
-  console.log(`Loaded "${agent.name}" from agents/${name}.jsonc (local fallback)`)
-  return { id: null, name: agent.name, ...agent }
+  return { id: null, name: local.name, ...local }
 })()
 
-console.log(`Agent: ${AGENT.id}`)
 console.log(`Workspace: ${WORKDIR}`)
 
 // --- client ----------------------------------------------------------------
@@ -400,9 +402,12 @@ async function start() {
           // session.output.voice — a session.voice object makes the whole
           // update fail with invalid_format and the call runs config-less.
           output: { voice: AGENT.voice?.voice_id || 'anna' },
-          // min_latency trades a little transcription accuracy for snappier
-          // turns — the right default for a live voice debugger.
-          input: { transcription_mode: 'min_latency' },
+          // min_latency garbles Chinese transcription — stay on balanced and
+          // bias STT with the phrases this agent actually hears.
+          input: {
+            transcription_prompt: 'SpeakToDebug 语音调试助手。常用指令：列出这个项目的文件、搜索代码、agent 定义在哪个文件、跑一下测试、修复 bug。工具名：list_files, search_code, read_file, run_tests.',
+            keyterms: ['列出', '文件', '搜索', '代码', '项目', '测试', '调试', '修复', 'speaktodebug', 'agent', 'list_files', 'search_code', 'read_file', 'run_tests', 'bug'],
+          },
           // AssemblyAI silently drops tools missing type:"function".
           tools: (AGENT.tools || []).map(t => ({ type: 'function', ...t })),
         },
