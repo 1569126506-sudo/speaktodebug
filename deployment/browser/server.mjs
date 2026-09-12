@@ -434,18 +434,23 @@ async function start() {
           break
 
         case 'input.speech.started':
-          // Barge-in: empty the ring buffer so the agent stops mid-word.
+          // Barge-in: stop both voices so the agent stops mid-word.
           playback?.port.postMessage('stop')
+          ttsStop()
           setStatus('listening')
           logEvent('down', msg.type)
           break
 
         case 'reply.started':
+          tts.spoken = 0
           setStatus('speaking')
           logEvent('down', msg.type)
           break
 
         case 'reply.audio': {
+          // With browser voice on, the text is spoken locally and the server
+          // audio would double-talk over it — drop it.
+          if (speakOn()) break
           const raw = atob(msg.data)
           const bytes = new Uint8Array(raw.length)
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
@@ -456,7 +461,12 @@ async function start() {
 
         case 'reply.done':
           setStatus('listening')
-          if (msg.status === 'interrupted') playback?.port.postMessage('stop')
+          if (msg.status === 'interrupted') {
+            playback?.port.postMessage('stop')
+            ttsStop()
+          } else {
+            ttsFlush()
+          }
           logEvent('down', msg.type, msg.status)
           break
 
@@ -473,8 +483,10 @@ async function start() {
           if (msg.reply_id !== liveReply) {
             liveReply = msg.reply_id
             dropPartial('agent')
+            tts.spoken = 0
           }
           partial('agent', appendDelta(partialText.agent || '', msg.delta))
+          ttsFeed(partialText.agent || '')
           break
 
         case 'transcript.user':
@@ -557,6 +569,7 @@ function stop() {
     ws?.close()
   }
   playback?.port.postMessage('stop')
+  ttsStop()
   mic?.getTracks().forEach((track) => track.stop())
   captureCtx?.close()
   playbackCtx?.close()
@@ -567,6 +580,7 @@ function stop() {
 
 function reset() {
   clearInterval(timer)
+  ttsStop()
   clearPartials()
   open.forEach((run) => paint(run, true))
   open.clear()
@@ -652,6 +666,63 @@ function partial(who, text) {
     $('transcript').append(partialEl[who])
   }
   scroll($('transcript'))
+}
+
+// --- browser-side voice -----------------------------------------------------
+// AssemblyAI's TTS ships no Chinese voice (docs list it under "coming soon"),
+// so its voices mangle Mandarin no matter how clean the audio stream is. The
+// reply TEXT lands here anyway, so by default the page speaks each completed
+// sentence with the browser's own voice — a native zh-CN voice on Windows —
+// and drops the server audio. Unchecking the box falls back to the server
+// voice, which is fine for English.
+const tts = { queue: [], spoken: 0, zh: null, en: null }
+
+function loadVoices() {
+  const vs = speechSynthesis.getVoices()
+  tts.zh = vs.find(v => /^zh\b|zh[-_]CN|Chinese|中文|huihui|xiaoxiao|yaoyao/i.test(v.lang + ' ' + v.name)) || null
+  tts.en = vs.find(v => /^en/i.test(v.lang)) || null
+}
+speechSynthesis.onvoiceschanged = loadVoices
+loadVoices()
+
+const speakOn = () => $('browservoice')?.checked !== false
+
+function ttsPump() {
+  if (speechSynthesis.speaking || speechSynthesis.pending) return
+  const sentence = tts.queue.shift()
+  if (!sentence) return
+  const u = new SpeechSynthesisUtterance(sentence)
+  const cjk = /[\u4e00-\u9fff]/.test(sentence)
+  if (cjk && tts.zh) u.voice = tts.zh
+  if (!cjk && tts.en) u.voice = tts.en
+  u.lang = cjk ? 'zh-CN' : 'en-US'
+  u.rate = 1.05
+  u.onend = u.onerror = ttsPump
+  speechSynthesis.speak(u)
+}
+
+// Speak every COMPLETE sentence in text[spoken..]; keep the tail for later.
+function ttsFeed(full) {
+  if (!speakOn()) return
+  const pending = full.slice(tts.spoken)
+  const m = pending.match(/^[\s\S]*[。！？!?.]/)
+  if (!m) return
+  tts.spoken += m[0].length
+  for (const s of m[0].split(/(?<=[。！？!?.])\s*/)) if (s.trim()) tts.queue.push(s.trim())
+  ttsPump()
+}
+
+function ttsFlush() {
+  if (!speakOn()) return
+  const tail = (partialText.agent || '').slice(tts.spoken)
+  tts.spoken = Infinity
+  if (tail.trim()) { tts.queue.push(tail.trim()); ttsPump() }
+}
+
+function ttsStop() {
+  tts.queue.length = 0
+  tts.spoken = 0
+  speechSynthesis.cancel()
 }
 
 function addLine(who, text) {
@@ -894,6 +965,7 @@ const HTML = `<!DOCTYPE html>
       </div>
       <div class="pane-foot">
         <select id="mic" aria-label="Microphone"><option value="">Default microphone</option></select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dsw-alias-label-secondary,#555);white-space:nowrap"><input type="checkbox" id="browservoice" checked> 中文朗读（浏览器语音）</label>
         <button id="btn">Start call</button>
       </div>
     </section>
