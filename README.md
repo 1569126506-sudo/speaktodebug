@@ -59,6 +59,10 @@ WORKDIR=C:\path\to\your-project npm start
 
 All paths are jailed to the workspace: anything resolving outside `WORKDIR` is rejected.
 
+## Demo video
+
+▶ **[Watch the 90-second demo (English subtitles)](demo/demo.mp4)** — a live Chinese session: the developer asks for the project layout and for where an agent is defined; SpeakToDebug calls `list_files` / `search_code` against the real workspace and speaks grounded answers. Nothing is uploaded — the tools run on the developer's machine.
+
 ## Demo script (60 s)
 
 1. *"Login page throws a 500 when the email is empty — find it."*
