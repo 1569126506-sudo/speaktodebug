@@ -69,8 +69,17 @@ const localTools = {
     const cmd = args.test_path
       ? `npm test -- ${args.test_path}`
       : (hasPkg ? 'npm test' : 'echo "no package.json in WORKDIR"')
-    const { stdout, stderr } = await execAsync(cmd, { cwd: WORKDIR, timeout: 110000 })
-    return { cmd, output: (stdout + '\n' + stderr).slice(-4000) }
+    // A failing suite is a RESULT, not an exception: the voice agent needs
+    // the output exactly when the exit code is non-zero.
+    let stdout = '', stderr = '', failed = false
+    try {
+      ;({ stdout, stderr } = await execAsync(cmd, { cwd: WORKDIR, timeout: 110000 }))
+    } catch (e) {
+      failed = true
+      stdout = e.stdout || ''
+      stderr = (e.stderr || '') + (e.killed ? '\n(timed out after 110s)' : '')
+    }
+    return { cmd, failed, output: (stdout + '\n' + stderr).trim().slice(-4000) }
   },
 }
 const runLocalTool = async (name, args) => {
@@ -953,8 +962,13 @@ const server = http.createServer(async (req, res) => {
     let body = ''
     req.on('data', (c) => { body += c })
     req.on('end', async () => {
+      // Both live outside the try: the old catch referenced `name` from the
+      // try scope, so any tool error (e.g. a jailed path) crashed the whole
+      // server with a ReferenceError instead of answering.
+      let name = '?'
+      let args = {}
       try {
-        const { name, args } = JSON.parse(body || '{}')
+        ;({ name, args = {} } = JSON.parse(body || '{}'))
         const result = await runLocalTool(name, args)
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ result }))
