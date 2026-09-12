@@ -81,31 +81,27 @@ const runLocalTool = async (name, args) => {
 loadEnv()
 required('ASSEMBLYAI_API_KEY', 'get one at https://www.assemblyai.com/dashboard/api-keys')
 
-// A published id means the agent is managed elsewhere, so use it as it is.
+// Agent config: loaded from the AssemblyAI store when reachable, with a
+// local file fallback so the server ALWAYS boots (the store's read
+// propagation has been observed to lag for 30+ minutes).
 const AGENT = await (async () => {
-  const name = process.env.AGENT || 'minimal'
+  const name = process.env.AGENT || 'speaktodebug'
   const known = storedAgentId(name)
   if (known) {
     try {
       const agent = await aai(`/agents/${known}`)
-      return { id: known, name: agent.name || 'Your agent' }
+      return { id: known, ...agent }
     } catch (error) {
-      console.error(`Could not load agent ${known}: ${error.message}`)
-      process.exit(1)
+      console.error(`Could not load agent ${known}: ${error.message} — falling back to local file`)
     }
   }
   const agent = readAgent(name)
-  try {
-    const { id, created } = await publishAgent(agent, { name, reuseByName: true })
-    console.log(`${created ? 'Created' : 'Updated'} "${agent.name}" from agents/${name}.jsonc`)
-    return { id, name: agent.name }
-  } catch (error) {
-    console.error(`Could not publish agents/${name}.jsonc: ${error.message}`)
-    process.exit(1)
-  }
+  console.log(`Loaded "${agent.name}" from agents/${name}.jsonc (local fallback)`)
+  return { id: null, name: agent.name, ...agent }
 })()
 
 console.log(`Agent: ${AGENT.id}`)
+console.log(`Workspace: ${WORKDIR}`)
 
 // --- client ----------------------------------------------------------------
 // Stringified and served as /app.js.
@@ -185,6 +181,11 @@ const PLAYBACK_WORKLET = `
       this._step = ${WIRE_RATE} / sampleRate;
       this._rsPos = 0;
       this._rsPrev = 0;
+      // Jitter buffer: playing samples the instant they arrive makes every
+      // network hiccup an audible gap. Hold PRE seconds before starting and
+      // re-arm after every underrun, so bursts smooth out instead of clicking.
+      this._pre = Math.floor(sampleRate * 0.15);
+      this._primed = false;
       // After a gap the speaker sits at zero, so interpolating from the
       // pre-gap _rsPrev would click. Reset it instead.
       this._drained = false;
@@ -192,6 +193,7 @@ const PLAYBACK_WORKLET = `
         if (e.data === 'stop') {
           this._writePos = this._readPos = this._available = 0;
           this._rsPos = this._rsPrev = 0;
+          this._primed = false;
           return;
         }
         const int16 = new Int16Array(e.data);
@@ -231,14 +233,19 @@ const PLAYBACK_WORKLET = `
       const output = outputs[0];
       const out = output[0];
       const cap = this._ring.length;
+      if (!this._primed && this._available >= this._pre) this._primed = true;
       for (let i = 0; i < out.length; i++) {
-        if (this._available > 0) {
+        if (this._available > 0 && this._primed) {
           out[i] = this._ring[this._readPos];
           this._readPos = (this._readPos + 1) % cap;
           this._available--;
         } else {
           out[i] = 0;
-          this._drained = true;
+          if (this._available === 0) {
+            // Underrun: re-arm the jitter buffer instead of sputtering.
+            this._primed = false;
+            this._drained = true;
+          }
         }
       }
       // Mono source, stereo sink.
@@ -380,10 +387,27 @@ async function start() {
       logEvent('up', 'input.audio')
     }
 
-    // Everything about the agent lives server-side; the session just names it.
+    // Inline session config: no dependency on the server-side agent store
+    // (whose read propagation has multi-minute lag). The full config travels
+    // in the session.update itself.
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'session.update', session: { agent_id: AGENT.id } }))
-      logEvent('up', 'session.update', AGENT.id)
+      ws.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          system_prompt: AGENT.system_prompt,
+          greeting: AGENT.greeting,
+          // Per the events-reference schema: voice is a string under
+          // session.output.voice — a session.voice object makes the whole
+          // update fail with invalid_format and the call runs config-less.
+          output: { voice: AGENT.voice?.voice_id || 'anna' },
+          // min_latency trades a little transcription accuracy for snappier
+          // turns — the right default for a live voice debugger.
+          input: { transcription_mode: 'min_latency' },
+          // AssemblyAI silently drops tools missing type:"function".
+          tools: (AGENT.tools || []).map(t => ({ type: 'function', ...t })),
+        },
+      }))
+      logEvent('up', 'session.update', 'inline config + ' + (AGENT.tools?.length || 0) + ' tools')
     }
 
     ws.onmessage = ({ data }) => {
@@ -851,6 +875,14 @@ const HTML = `<!DOCTYPE html>
       <div class="pane-head"><span>Transcript</span></div>
       <div class="pane-body" id="transcript">
         <div class="empty">Start the call and talk. Partial transcripts appear as they stream, and tool calls show up inline.</div>
+    <div style="padding:10px 14px;font-size:13px;line-height:1.7;background:rgba(125,125,125,.12);border-radius:8px;margin-top:8px">
+      <div><b>Workspace:</b> <code id="workdir" style="font-family:var(--font-mono)">${WORKDIR.replace(/</g, "&lt;")}</code></div>
+      <div style="margin-top:6px"><b>Try asking:</b></div>
+      <div>· 列出这个项目的文件 &nbsp;/&nbsp; List the files in this project</div>
+      <div>· 搜索代码里的 speaktodebug &nbsp;/&nbsp; Search the code for speaktodebug</div>
+      <div>· agent 定义在哪个文件 &nbsp;/&nbsp; Which file defines the agent</div>
+      <div style="margin-top:6px;color:var(--dsw-alias-label-tertiary,#888);font-size:12px">It reads this folder on your disk — no file upload needed. Change it with: WORKDIR=&lt;your project&gt; npm start</div>
+    </div>
       </div>
       <div class="pane-foot">
         <select id="mic" aria-label="Microphone"><option value="">Default microphone</option></select>

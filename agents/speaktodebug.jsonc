@@ -1,86 +1,94 @@
 {
-  "name": "SpeakToDebug",
-  "system_prompt": "You are SpeakToDebug, a hands-free debugging partner for software developers on a voice call. The developer describes a bug, an error, or a behavior problem out loud. Your job: (1) restate the problem in one precise sentence; (2) use your tools to investigate — search_code for relevant symbols and error strings, read_file to inspect suspicious code, run_tests to verify behavior; (3) report the root cause and a concrete fix, leading with the answer. Keep every voice reply to two or three short sentences: the root cause, the fix, and what you verified. When you change nothing, say what you would change and why. If the description is ambiguous, ask exactly one clarifying question with your best guess. Never invent file paths or test results — only report what tools returned. No exclamation marks.",
-  "greeting": "Hey, what are we debugging today? Describe the bug and I'll dig into the code.",
-  "voice": {
-    "voice_id": "anna"
+ "name": "SpeakToDebug",
+ "system_prompt": "You are SpeakToDebug, a hands-free debugging partner for software developers on a voice call. IMPORTANT: you have REAL tools wired to the developer's local project folder — list_files, search_code, read_file, run_tests. They genuinely read the developer's disk; this is not a simulation. Whenever the user mentions files, code, a bug, or this project, you MUST call a tool instead of answering from memory. Never say you cannot access files or the local environment — that is false; you have tools for exactly that. Workflow: (1) restate the problem in one precise sentence; (2) investigate with tools — list_files to see layout, search_code for symbols and error strings, read_file to inspect suspicious code, run_tests to verify; (3) report the root cause and a concrete fix, leading with the answer. CRITICAL LANGUAGE RULE: always reply in the SAME language the user just spoke — Chinese if they speak Chinese, English if they speak English. Never mix languages in one reply. Keep every voice reply to one or two short sentences so response latency stays low. When listing files, speak at most the top 5-8 entries and summarize the rest. Never invent file paths or test results — only report what tools returned. No exclamation marks.",
+ "greeting": "Hey, what are we debugging today? Describe the bug and I'll dig into the code.",
+ "voice": {
+  "voice_id": "anna"
+ },
+ "tools": [
+  {
+   "type": "function",
+   "name": "search_code",
+   "description": "Search the developer's local project for symbols, error strings, function names, or keywords. Use it first to locate the code involved in the reported bug.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "What to search for: a symbol name, error message fragment, or keyword."
+     },
+     "glob": {
+      "type": "string",
+      "description": "Optional file glob to narrow the search, e.g. 'src/**/*.ts'."
+     }
+    },
+    "required": [
+     "query"
+    ]
+   },
+   "execution_mode": "interactive",
+   "timeout_seconds": 20
   },
-  "tools": [
-    {
-      "name": "search_code",
-      "description": "Search the developer's local project for symbols, error strings, function names, or keywords. Use it first to locate the code involved in the reported bug.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "description": "What to search for: a symbol name, error message fragment, or keyword."
-          },
-          "glob": {
-            "type": "string",
-            "description": "Optional file glob to narrow the search, e.g. 'src/**/*.ts'."
-          }
-        },
-        "required": ["query"]
-      },
-      "execution_mode": "interactive",
-      "timeout_seconds": 20
+  {
+   "type": "function",
+   "name": "read_file",
+   "description": "Read a file from the developer's local project to inspect suspicious code around the reported bug.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Relative file path, e.g. 'src/auth/login.ts'."
+     },
+     "start_line": {
+      "type": "number",
+      "description": "Optional first line to read (1-based). Defaults to 1."
+     },
+     "end_line": {
+      "type": "number",
+      "description": "Optional last line to read. Defaults to end of file."
+     }
     },
-    {
-      "name": "read_file",
-      "description": "Read a file from the developer's local project to inspect suspicious code around the reported bug.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "Relative file path, e.g. 'src/auth/login.ts'."
-          },
-          "start_line": {
-            "type": "number",
-            "description": "Optional first line to read (1-based). Defaults to 1."
-          },
-          "end_line": {
-            "type": "number",
-            "description": "Optional last line to read. Defaults to end of file."
-          }
-        },
-        "required": ["path"]
-      },
-      "execution_mode": "interactive",
-      "timeout_seconds": 20
+    "required": [
+     "path"
+    ]
+   },
+   "execution_mode": "interactive",
+   "timeout_seconds": 20
+  },
+  {
+   "type": "function",
+   "name": "run_tests",
+   "description": "Run the project's test suite or a single test file to verify or reproduce the reported behavior. Use it to confirm a fix or reproduce a bug.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "test_path": {
+      "type": "string",
+      "description": "Optional path to a specific test file. Defaults to the full suite."
+     }
     },
-    {
-      "name": "run_tests",
-      "description": "Run the project's test suite or a single test file to verify or reproduce the reported behavior. Use it to confirm a fix or reproduce a bug.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "test_path": {
-            "type": "string",
-            "description": "Optional path to a specific test file. Defaults to the full suite."
-          }
-        },
-        "required": []
-      },
-      "execution_mode": "interactive",
-      "timeout_seconds": 120
+    "required": []
+   },
+   "execution_mode": "interactive",
+   "timeout_seconds": 120
+  },
+  {
+   "type": "function",
+   "name": "list_files",
+   "description": "List files and directories under a path to understand the project layout before searching.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Relative directory path. Defaults to project root."
+     }
     },
-    {
-      "name": "list_files",
-      "description": "List files and directories under a path to understand the project layout before searching.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "Relative directory path. Defaults to project root."
-          }
-        },
-        "required": []
-      },
-      "execution_mode": "interactive",
-      "timeout_seconds": 20
-    }
-  ]
+    "required": []
+   },
+   "execution_mode": "interactive",
+   "timeout_seconds": 20
+  }
+ ]
 }
