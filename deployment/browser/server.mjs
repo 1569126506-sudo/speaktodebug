@@ -680,12 +680,19 @@ const tts = { queue: [], spoken: 0, zh: null, en: null }
 function loadVoices() {
   const vs = speechSynthesis.getVoices()
   tts.zh = vs.find(v => /^zh\b|zh[-_]CN|Chinese|中文|huihui|xiaoxiao|yaoyao/i.test(v.lang + ' ' + v.name)) || null
-  tts.en = vs.find(v => /^en/i.test(v.lang)) || null
+  // Prefer a female English voice (Zira) so English sentences don't jump to
+  // a male voice mid-conversation.
+  tts.en = vs.find(v => /zira/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || null
 }
 speechSynthesis.onvoiceschanged = loadVoices
 loadVoices()
 
 const speakOn = () => $('browservoice')?.checked !== false
+
+// Split sentences at Chinese punctuation, or Latin .!? followed by
+// whitespace — never inside identifiers like package.json or README.md,
+// whose fragments would otherwise be read by the wrong voice.
+const SENTENCE_SPLIT = /(?<=[。！？])\s*|(?<=[.!?])\s+/
 
 function ttsPump() {
   if (speechSynthesis.speaking || speechSynthesis.pending) return
@@ -705,10 +712,12 @@ function ttsPump() {
 function ttsFeed(full) {
   if (!speakOn()) return
   const pending = full.slice(tts.spoken)
-  const m = pending.match(/^[\s\S]*[。！？!?.]/)
+  // Greedy: everything through the last sentence terminator (Chinese marks,
+  // or Latin marks followed by whitespace so "package.json" stays whole).
+  const m = pending.match(/^[\s\S]*(?:[。！？]|[.!?](?=\s))/)
   if (!m) return
   tts.spoken += m[0].length
-  for (const s of m[0].split(/(?<=[。！？!?.])\s*/)) if (s.trim()) tts.queue.push(s.trim())
+  for (const s of m[0].split(SENTENCE_SPLIT)) if (s.trim()) tts.queue.push(s.trim())
   ttsPump()
 }
 
