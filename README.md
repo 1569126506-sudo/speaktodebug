@@ -1,8 +1,10 @@
 # SpeakToDebug — Debug out loud
 
+<p align="center"><img src="demo/cover.png" alt="SpeakToDebug — Debug Out Loud" width="760"></p>
+
 **A voice-first debugging partner.** Describe a bug out loud — SpeakToDebug searches your real code, reads the files, runs your tests, and speaks the root cause and fix back to you.
 
-Built for the [AssemblyAI - Voice Agent Hackathon](https://lablab.ai/ai-hackathons/assemblyai-voice-agent-hackathon) (Sep 2026).
+Built for the [AssemblyAI - Voice Agent Hackathon](https://lablab.ai/ai-hackathons/assemblyai-voice-agent-hackathon) (Sep 2026) and submitted to the [Lablab x AMD AI Academy Challenge](https://lablab.ai/ai-hackathons/amd-lablab-ai-academy-challenge).
 
 ## Why
 
@@ -61,7 +63,7 @@ All paths are jailed to the workspace: anything resolving outside `WORKDIR` is r
 
 ## Demo video
 
-▶ **[Watch the 90-second demo (English subtitles)](demo/demo.mp4)** — a live Chinese session: the developer asks for the project layout and for where an agent is defined; SpeakToDebug calls `list_files` / `search_code` against the real workspace and speaks grounded answers. Nothing is uploaded — the tools run on the developer's machine.
+▶ **[Watch the 100-second demo (English subtitles + Chinese phase captions)](demo/demo.mp4)** — a live Chinese session: the developer asks for the project layout and for where an agent is defined; SpeakToDebug calls `list_files` / `search_code` against the real workspace and speaks grounded answers. Nothing is uploaded — the tools run on the developer's machine.
 
 ## Demo script (60 s)
 
