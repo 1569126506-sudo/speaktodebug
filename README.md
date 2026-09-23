@@ -1,6 +1,7 @@
 # SpeakToDebug — Debug out loud
 
 <p align="center"><img src="demo/cover.png" alt="SpeakToDebug — Debug Out Loud" width="760"></p>
+<p align="center"><img src="demo/demo.gif" alt="A live session: the question is spoken, list_files / read_file / search_code run locally, the answer names real files" width="760"></p>
 
 **A voice-first debugging partner.** Describe a bug out loud — SpeakToDebug searches your real code, reads the files, runs your tests, and speaks the root cause and fix back to you.
 
@@ -60,6 +61,18 @@ WORKDIR=C:\path\to\your-project npm start
 | `list_files` | Lists a directory's entries with file/dir types |
 
 All paths are jailed to the workspace: anything resolving outside `WORKDIR` is rejected.
+
+## Security & tests
+
+The tool endpoint reads your disk and spawns processes, so it is hardened by default:
+
+- **Loopback only.** Without `PORT` the server binds `127.0.0.1` — `/api/tools` never answers your LAN. Hosted deploys (Render) set `PORT` and opt out.
+- **Containment by `path.relative`.** A `startsWith` jail lets a sibling like `<workdir>-backup` through; `../sibling/x` is rejected by comparing the relative path itself.
+- **Secret files are refused.** `read_file` rejects `.env`, `*.pem` and `id_rsa*` — key material is never read aloud on a call.
+- **No shell metacharacters.** `run_tests`' `test_path` is restricted to plain path characters before it touches a shell.
+- **Search honors its schema.** The advertised `glob` argument (`src/**/*.ts` and friends) actually filters results.
+
+Verified by a **26-check suite**: `npm test` (10 offline checks — page, tools, jailing, escapes, secret refusal, glob) plus `node test/selftest.mjs` (16-check live preflight that streams pre-rendered question audio through the relay, asserts the STT → tool-call → grounded spoken answer round-trip, and measures audio chunk smoothness, p99 < 150 ms).
 
 ## Demo video
 

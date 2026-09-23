@@ -1,7 +1,7 @@
 // Full pre-flight self-test for SpeakToDebug. Everything a real call does,
-// minus the microphone: every local tool, path jailing, the relay's two-way
-// flow across multiple turns, and the smoothness of audio arriving through
-// the relay (the metric the whole relay exists for).
+// minus the microphone: every local tool, path jailing, and a live relay
+// session driven by REAL SPEECH (pre-rendered question audio streamed as
+// input.audio), asserting tools fire and audio arrives smooth.
 import { readFileSync } from 'node:fs'
 
 const BASE = 'http://localhost:3000'
@@ -57,23 +57,29 @@ const call = async (name, args) =>
   check('path jailing blocks escapes', !!r.error, r.error ? 'refused: ' + r.error.slice(0, 50) : 'LEAKED!')
 }
 
-// ---------- 3. relay: two turns + audio smoothness ----------
+// ---------- 3. relay: real audio in, tools out, audio smooth ----------
+// No microphone here, so the questions are pre-rendered speech
+// (test/fixtures/q*.pcm, 24 kHz s16le mono) streamed as input.audio — the
+// exact frames a live call sends. Text seeding (conversation.message) stopped
+// reaching the model in Sep 2026 and is not used: real audio is the honest
+// path and doubles as an STT check.
 {
   const AGENT = JSON.parse(
     readFileSync(new URL('../agents/speaktodebug.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '')
   )
   const ws = new WebSocket('ws://localhost:3000/agent-ws')
   const gaps = []
-  let last = 0, ready = false, dones = 0, toolCalls = 0, turns = 0, phase = 0
-  let turnText = ''
+  let last = 0, ready = false, dones = 0, toolCalls = 0
+  const heard = []
   let fail = ''
-  const timer = setTimeout(() => { fail = fail || 'overall timeout'; finish() }, 120_000)
+  const timer = setTimeout(() => { fail = fail || 'overall timeout'; finish() }, 150_000)
 
   const finish = () => {
-    clearTimeout(timer); try { ws.close() } catch {}
+    clearTimeout(timer); clearTimeout(qTimer); try { ws.close() } catch {}
     check('relay: session reaches ready', ready)
-    check('relay: both conversation turns answered', turns === 2, turns + '/2 turns')
-    check('relay: tools invoked when asked', toolCalls >= 1, toolCalls + ' tool call(s) — later turns may reuse earlier context without re-calling')
+    check('relay: STT hears the streamed questions', heard.length >= 1, 'heard: ' + (heard.join(' | ') || 'nothing'))
+    check('relay: both conversation turns answered', dones >= 2, dones + '/2 turns')
+    check('relay: tools invoked when asked', toolCalls >= 1, toolCalls + ' tool call(s)')
     const g = gaps.slice(1).sort((a, b) => a - b)
     if (g.length) {
       const q = p => g[Math.floor(g.length * p)].toFixed(0)
@@ -83,17 +89,55 @@ const call = async (name, args) =>
     summary()
   }
 
+  // Stream one question fixture as ~50 ms input.audio frames, then ~600 ms of
+  // silence so turn detection closes the utterance.
+  const streamQuestion = (i) => {
+    const pcm = readFileSync(new URL(`fixtures/q${i}.pcm`, import.meta.url))
+    const CH = 2400 // 50 ms of 24 kHz s16le mono
+    let off = 0
+    const pump = () => {
+      if (ws.readyState !== 1) return
+      if (off >= pcm.length) {
+        let silent = 0
+        const sil = () => {
+          if (ws.readyState !== 1) return
+          if (silent++ >= 12) return
+          ws.send(JSON.stringify({ type: 'input.audio', audio: Buffer.alloc(CH).toString('base64') }))
+          setTimeout(sil, 50)
+        }
+        return sil()
+      }
+      ws.send(JSON.stringify({ type: 'input.audio', audio: pcm.subarray(off, off + CH).toString('base64') }))
+      off += CH
+      setTimeout(pump, 46) // slightly faster than real time to absorb timer drift
+    }
+    pump()
+  }
+
+  let qTimer = null
+  const ask = (i) => {
+    clearTimeout(qTimer)
+    qTimer = setTimeout(() => finish(), 40_000) // a dead session must not hang
+    streamQuestion(i)
+  }
+
   ws.onopen = () => ws.send(JSON.stringify({
     type: 'session.update',
     session: {
-      system_prompt: AGENT.system_prompt, greeting: AGENT.greeting,
+      system_prompt: AGENT.system_prompt,
+      // No greeting: the first voice the session hears must be the question.
       output: { voice: AGENT.voice?.voice_id || 'anna' },
+      input: {
+        transcription_prompt: 'SpeakToDebug 语音调试助手。常用指令：列出这个项目的文件、搜索代码。工具名：list_files, search_code, read_file, run_tests.',
+        keyterms: ['列出', '文件', '搜索', '代码', '项目', '测试', 'speaktodebug', 'list_files', 'search_code'],
+      },
       tools: AGENT.tools.map(t => ({ type: 'function', ...t })),
     },
   }))
   ws.onerror = () => { fail = 'relay socket error'; finish() }
   ws.onmessage = async ({ data }) => {
     const msg = JSON.parse(data)
+    if (msg.type === 'reply.started') last = 0 // silence between replies is not a gap
     if (msg.type === 'reply.audio') {
       const now = performance.now()
       if (last) gaps.push(now - last)
@@ -102,32 +146,20 @@ const call = async (name, args) =>
     if (msg.type === 'session.error') { fail = 'session.error: ' + msg.message; finish() }
     if (msg.type === 'session.ready') {
       ready = true
-      // Fire question 0 immediately — empirically the seeded message only
-      // drives the reply when it races the greeting round (relay-e2e runs
-      // 4/4 this way vs. 0/2 when asked after the greeting finished).
-      ask(0)
+      setTimeout(() => ask(0), 300)
     }
+    if (msg.type === 'transcript.user' && msg.text) heard.push(msg.text)
     if (msg.type === 'tool.call') {
       toolCalls++
       const r = await call(msg.name, msg.arguments ?? {})
       ws.send(JSON.stringify({ type: 'tool.result', call_id: msg.call_id, result: JSON.stringify(r.result ?? r), is_error: false }))
     }
-    if (msg.type === 'transcript.agent' && msg.text) {
-      turnText += msg.text
-      console.log('   [agent]', msg.text)
-    }
+    if (msg.type === 'transcript.agent' && msg.text) console.log('   [agent]', msg.text)
     if (msg.type === 'reply.done') {
-      // done #1 is the greeting, #2 the answer to question 0, #3 to question 1.
       dones++
-      if (dones === 2) { turns = 1; setTimeout(() => ask(1), 500) }
-      if (dones >= 3) { turns = 2; finish() }
+      if (dones === 1) setTimeout(() => ask(1), 400)
+      if (dones >= 2) finish()
     }
-  }
-  const ask = (i) => {
-    ws.send(JSON.stringify({ type: 'conversation.message', role: 'user', content: ['列出这个项目的文件', '搜索代码里的 SpeakToDebug'][i] }))
-    // conversation.message only seeds context; without one-shot instructions
-    // the model sometimes answers from its persona instead of the question.
-    ws.send(JSON.stringify({ type: 'reply.create', instructions: 'Answer the user\'s last message now, using your tools if needed.' }))
   }
 }
 

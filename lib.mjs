@@ -205,6 +205,9 @@ export class ApiError extends Error {
 export async function aai(path, { method = 'GET', body, headers = {} } = {}) {
   const res = await fetch(agentsApi() + path, {
     method,
+    // A hung API call must not hang the relay's token mint (the browser
+    // would sit on a connecting socket with no error forever).
+    signal: AbortSignal.timeout(15000),
     headers: {
       Authorization: `Bearer ${process.env.ASSEMBLYAI_API_KEY}`,
       'Content-Type': 'application/json',

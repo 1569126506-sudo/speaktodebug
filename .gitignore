@@ -2,3 +2,9 @@ node_modules/
 .env
 agents/*.env
 server.log
+
+# local edit workspace + transcode variants (the canonical demo is demo.mp4)
+demo_edit/
+demo/demo_480p.mp4
+demo/demo_web.mp4
+SUBMISSION.md

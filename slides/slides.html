@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+@page { size: 1280px 720px; margin: 0; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background:#0d1117; color:#e6edf3; }
+.slide { width:1280px; height:720px; page-break-after: always; padding:80px 100px; display:flex; flex-direction:column; justify-content:center; position:relative; }
+.slide:last-child { page-break-after: auto; }
+.badge { position:absolute; top:40px; right:60px; font-size:20px; color:#8b949e; border:1px solid #30363d; padding:6px 18px; border-radius:20px; }
+h1 { font-size:76px; line-height:1.15; color:#58a6ff; }
+h2 { font-size:52px; margin-bottom:44px; color:#58a6ff; }
+.sub { font-size:34px; color:#c9d1d9; margin-top:28px; }
+.tag { display:inline-block; background:#1f6feb22; border:1px solid #1f6feb; color:#58a6ff; font-size:24px; padding:10px 24px; border-radius:10px; margin:10px 14px 0 0; }
+ul { list-style:none; }
+li { font-size:32px; line-height:1.5; margin:26px 0; padding-left:44px; position:relative; }
+li::before { content:"▸"; position:absolute; left:0; color:#3fb950; }
+.flow { font-size:30px; line-height:1.9; background:#161b22; border:1px solid #30363d; border-radius:14px; padding:36px 44px; }
+.hl { color:#3fb950; font-weight:600; }
+.foot { position:absolute; bottom:36px; left:100px; font-size:20px; color:#8b949e; }
+code { background:#21262d; padding:2px 10px; border-radius:6px; font-size:0.92em; color:#79c0ff; }
+</style></head><body>
+
+<div class="slide">
+  <div class="badge">AssemblyAI · Voice Agent Hackathon</div>
+  <h1>SpeakToDebug</h1>
+  <div class="sub" style="font-size:44px; color:#3fb950; font-weight:600;">Debug out loud.</div>
+  <div class="sub">Describe a bug out loud — the agent searches your real code,<br>runs your tests, and speaks the root cause and fix back to you.</div>
+  <div style="margin-top:60px;">
+    <span class="tag">AssemblyAI Voice Agent API</span><span class="tag">Universal-3.5 Pro</span><span class="tag">Interactive Tool Calling</span>
+  </div>
+</div>
+
+<div class="slide">
+  <h2>The problem</h2>
+  <ul>
+    <li>Bugs strike while your hands are busy — mid-edit, mid-review, second screen</li>
+    <li>Chat assistants can <i>talk</i> about code, but they have never seen <b>your</b> code</li>
+    <li>Pasting context, copying errors, switching windows — every step breaks flow</li>
+    <li>Voice is how you'd explain it to a colleague. So why not to your tools?</li>
+  </ul>
+  <div class="foot">SpeakToDebug — Debug out loud</div>
+</div>
+
+<div class="slide">
+  <h2>How it works</h2>
+  <div class="flow">
+    🎤 Browser mic ──wss──▶ <span class="hl">AssemblyAI Voice Agent API</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;Universal-3.5 Pro STT · LLM reasoning · TTS · turn-taking<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;│ JSON-Schema <span class="hl">tool calling</span><br>
+    🛠 &nbsp;Local tool layer in your <b>real repo</b> — results stream back<br>
+    🔊 &nbsp;Agent <span class="hl">speaks</span> the root cause and fix — grounded, never invented
+  </div>
+  <div class="foot">SpeakToDebug — Debug out loud</div>
+</div>
+
+<div class="slide">
+  <h2>Real tools, real code</h2>
+  <ul>
+    <li><code>search_code</code> — recursive grep across your actual project</li>
+    <li><code>read_file</code> — opens the suspicious lines, line-ranged</li>
+    <li><code>run_tests</code> — executes your real test suite (npm test)</li>
+    <li><code>list_files</code> — maps the project tree</li>
+    <li>Sandboxed: every path is jailed to the workspace; 15-check self-test</li>
+  </ul>
+  <div class="foot">SpeakToDebug — Debug out loud</div>
+</div>
+
+<div class="slide">
+  <h2>Deep AssemblyAI integration</h2>
+  <ul>
+    <li><b>One WebSocket</b> handles STT + reasoning + voice output + turn-taking</li>
+    <li>Interactive <code>tool.call</code> / <code>tool.result</code> loop — the core of the demo</li>
+    <li>Session schema tuned: jitter buffer, min_latency for real-time answers</li>
+    <li>Chinese-first: STT keyword biasing + zh-CN voice output, bilingual captions</li>
+  </ul>
+  <div class="foot">SpeakToDebug — Debug out loud</div>
+</div>
+
+<div class="slide">
+  <h2>Status</h2>
+  <ul>
+    <li>Working prototype — full voice → tools → voice loop on a real repo</li>
+    <li>90-second demo video: a live Chinese debugging session</li>
+    <li>Open source, MIT licensed</li>
+  </ul>
+  <h1 style="margin-top:60px;">Debug out loud. 🎙</h1>
+  <div class="foot">github.com/1569126506-sudo/speaktodebug</div>
+</div>
+
+</body></html>

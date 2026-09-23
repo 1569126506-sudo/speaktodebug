@@ -17,10 +17,24 @@ const execAsync = promisify(exec)
 
 // --- SpeakToDebug: local code tools for interactive client-side calls ------
 const WORKDIR = process.env.WORKDIR || process.cwd()
+const WORKDIR_ABS = path.resolve(WORKDIR)
 const safePath = (p) => {
-  const full = path.resolve(WORKDIR, p || '.')
-  if (!full.startsWith(path.resolve(WORKDIR))) throw new Error('path outside the workspace')
+  const full = path.resolve(WORKDIR_ABS, p || '.')
+  // path.relative is the canonical containment test: a startsWith on the
+  // resolved string lets a sibling with a shared prefix through (a request
+  // for "..myproject" resolving to "<sibling-myproject>" passes a
+  // startsWith(WORKDIR) check while reading outside the workspace).
+  const rel = path.relative(WORKDIR_ABS, full)
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel))
+    throw new Error('path outside the workspace')
   return full
+}
+// Files whose contents are credentials rather than code. The agent may name
+// them out loud on a call, so read_file refuses them outright.
+const SECRET_FILE = /(^|[\\/])\.env$|\.pem$|(^|[\\/])id_rsa/
+const guardSecret = (file) => {
+  if (SECRET_FILE.test(file))
+    throw new Error(`"${path.basename(file)}" looks like key material — read_file refuses secret files`)
 }
 const localTools = {
   list_files(args) {
@@ -32,6 +46,7 @@ const localTools = {
   },
   read_file(args) {
     const file = safePath(args.path)
+    guardSecret(file)
     const lines = fs.readFileSync(file, 'utf8').split('\n')
     const start = Math.max(0, (args.start_line || 1) - 1)
     const end = Math.min(lines.length, args.end_line || lines.length)
@@ -44,6 +59,22 @@ const localTools = {
   search_code(args) {
     const query = String(args.query || '').toLowerCase()
     if (!query) return { query, hits: [] }
+    // The published tool schema advertises an optional glob. Supported subset:
+    // '<dir>/**/*.<ext>', '**/*.<ext>' and '*.<ext>' — a directory prefix
+    // plus one extension filter, which covers the specs the LLM actually
+    // emits ('src/**/*.ts'). Anything else filters nothing.
+    let dirPrefix = '', ext = ''
+    const glob = args.glob ? String(args.glob).replace(/\\/g, '/') : ''
+    // Order matters: the two-asterisk forms must win over the single-star
+    // forms, or '**/*.mjs' parses as a directory named '*'.
+    let m
+    if ((m = glob.match(/^(.+?)\/\*\*\/\*\.(\w+)$/))) { dirPrefix = m[1]; ext = '.' + m[2] }
+    else if ((m = glob.match(/^\*\*\/\*\.(\w+)$/))) { ext = '.' + m[1] }
+    else if ((m = glob.match(/^(.+?)\/\*\.(\w+)$/))) { dirPrefix = m[1]; ext = '.' + m[2] }
+    else if ((m = glob.match(/^\*\.(\w+)$/))) { ext = '.' + m[1] }
+    const keep = (rel) =>
+      (!dirPrefix || rel.startsWith(dirPrefix + '/')) &&
+      (!ext || rel.endsWith(ext))
     const hits = []
     const walk = (dir, depth) => {
       if (depth > 8 || hits.length >= 50) return
@@ -54,20 +85,31 @@ const localTools = {
         if (e.isDirectory()) { walk(fp, depth + 1); continue }
         let content = ''
         try { content = fs.readFileSync(fp, 'utf8') } catch { continue }
+        const rel = path.relative(WORKDIR, fp).replace(/\\/g, '/')
+        if (!keep(rel)) continue
         content.split('\n').forEach((line, i) => {
           if (hits.length < 50 && line.toLowerCase().includes(query)) {
-            hits.push({ file: path.relative(WORKDIR, fp), line: i + 1, text: line.trim().slice(0, 200) })
+            hits.push({ file: rel, line: i + 1, text: line.trim().slice(0, 200) })
           }
         })
       }
     }
     walk(WORKDIR, 0)
-    return { query, hits }
+    return { query, glob: glob || undefined, hits }
   },
   async run_tests(args) {
+    // test_path travels from the LLM straight into a shell command, so it is
+    // limited to plain path characters — no quotes, pipes or separators that
+    // cmd.exe would interpret.
+    let testPath = ''
+    if (args.test_path) {
+      testPath = String(args.test_path).trim()
+      if (!/^[\w][\w .\-/\\]*$/.test(testPath))
+        throw new Error(`test_path "${testPath}" is not a plain path`)
+    }
     const hasPkg = fs.existsSync(path.join(WORKDIR, 'package.json'))
-    const cmd = args.test_path
-      ? `npm test -- ${args.test_path}`
+    const cmd = testPath
+      ? `npm test -- ${testPath}`
       : (hasPkg ? 'npm test' : 'echo "no package.json in WORKDIR"')
     // A failing suite is a RESULT, not an exception: the voice agent needs
     // the output exactly when the exit code is non-zero.
@@ -969,12 +1011,12 @@ const HTML = `<!DOCTYPE html>
       <div>· 列出这个项目的文件 &nbsp;/&nbsp; List the files in this project</div>
       <div>· 搜索代码里的 speaktodebug &nbsp;/&nbsp; Search the code for speaktodebug</div>
       <div>· agent 定义在哪个文件 &nbsp;/&nbsp; Which file defines the agent</div>
-      <div style="margin-top:6px;color:var(--dsw-alias-label-tertiary,#888);font-size:12px">It reads this folder on your disk — no file upload needed. Change it with: WORKDIR=&lt;your project&gt; npm start</div>
+      <div style="margin-top:6px;color:var(--text-faint);font-size:12px">It reads this folder on your disk — no file upload needed. Change it with: WORKDIR=&lt;your project&gt; npm start</div>
     </div>
       </div>
       <div class="pane-foot">
         <select id="mic" aria-label="Microphone"><option value="">Default microphone</option></select>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dsw-alias-label-secondary,#555);white-space:nowrap"><input type="checkbox" id="browservoice" checked> 中文朗读（浏览器语音）</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);white-space:nowrap"><input type="checkbox" id="browservoice" checked> 中文朗读（浏览器语音）</label>
         <button id="btn">Start call</button>
       </div>
     </section>
@@ -1016,6 +1058,13 @@ function publicAgent(agent) {
 
 const server = http.createServer(async (req, res) => {
   if (req.url === '/agent') {
+    // A fresh clone has no stored id (the agent was never published), so
+    // there is nothing to fetch — the local config is the truth anyway.
+    if (!AGENT.id) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(publicAgent(AGENT)))
+      return
+    }
     try {
       const agent = await aai(`/agents/${AGENT.id}`)
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -1112,15 +1161,19 @@ server.on('upgrade', (req, socket, head) => {
   })
 })
 
-// PORT when set, otherwise 3000 and up until one is free.
+// PORT when set (hosted deploys such as Render need 0.0.0.0), otherwise 3000
+// and up until one is free — bound to loopback only, because /api/tools reads
+// the disk and spawns processes and must not answer the LAN of whatever café
+// Wi-Fi the developer is on.
 let port = Number(process.env.PORT) || 3000
+const HOST = process.env.PORT ? undefined : '127.0.0.1'
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE' && !process.env.PORT && port < 3010) {
     port += 1
-    server.listen(port)
+    server.listen(port, HOST)
     return
   }
   throw err
 })
 server.on('listening', () => console.log(`Talk to it: http://localhost:${port}`))
-server.listen(port)
+server.listen(port, HOST)
